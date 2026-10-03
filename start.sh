@@ -4,7 +4,7 @@ set -euo pipefail
 
 BASE_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)" || exit 1
 APP_MODE="${1:-run}"
-APP_FILE="src/pi_lights/main.py"
+APP_FILE="src/pi_lights"
 
 case "$APP_MODE" in
     dev)
