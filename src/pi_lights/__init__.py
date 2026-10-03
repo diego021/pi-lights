@@ -1,8 +1,12 @@
+import threading
+
 import fastapi
 
-from . import switch
+from . import sensor, switch
 
 app = fastapi.FastAPI()
+thread = threading.Thread(target=sensor.run_loop, daemon=True)
+thread.start()
 
 
 @app.post('/lights/on_movement')

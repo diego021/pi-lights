@@ -8,7 +8,7 @@ APP_FILE="src/pi_lights"
 
 case "$APP_MODE" in
     dev)
-	ARGS=(--host 0.0.0.0 --reload)
+	ARGS=(--host 0.0.0.0)
 	;;
     run)
 	ARGS=()
