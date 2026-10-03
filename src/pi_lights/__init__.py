@@ -1,2 +1,2 @@
 def main() -> None:
-    print("Hello from pi-lights!")
+    print('Hello from pi-lights!')

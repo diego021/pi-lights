@@ -14,3 +14,27 @@ pi-lights = "pi_lights:main"
 [build-system]
 requires = ["uv_build>=0.12.19,<0.13.0"]
 build-backend = "uv_build"
+
+[tool.ruff.format]
+quote-style = "single"
+
+[tool.ruff.lint]
+extend-select = [
+    "ANN",  # flake8-annotations
+    "ARG",  # flake8-unused-arguments
+    "A",    # flake8-builtins
+    "B",    # flake8-bugbear
+    "C4",   # flake8-comprehensions
+    "F",    # PyFlakes
+    "G",    # flake8-logging-format
+    "I",    # isort
+    "LOG",  # flake8-logging
+    "N",    # pep8-naming
+    "PL",   # Pylint
+    "RET",  # flake8-return
+    "RSE",  # flake8-raise
+    "SIM",  # flake8-simplify
+    "SLF",  # flake8-self
+    "TD",   # flake8-todos
+    "UP",   # pyupgrade
+]

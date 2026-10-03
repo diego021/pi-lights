@@ -2,7 +2,6 @@ import fastapi
 
 from . import switch
 
-
 app = fastapi.FastAPI()
 
 
@@ -15,7 +14,7 @@ def turn_lights_on_movement() -> dict:
         switch.turn_on_for(seconds=15)
         succeed = True
         reason = 'movement-detected'
-    
+
     return {'succeed': succeed, 'reason': reason}
 
 
