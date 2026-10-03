@@ -1,12 +1,22 @@
 import threading
+import time
 
 import fastapi
 
 from . import sensor, switch
 
-app = fastapi.FastAPI()
-thread = threading.Thread(target=sensor.run_loop, daemon=True)
+
+def infinite_loop() -> None:
+    while True:
+        if sensor.check_night() and sensor.get_reading() < sensor.THRESHOLD:
+            switch.turn_on_for(20)
+            continue
+        time.sleep(1)
+
+
+thread = threading.Thread(target=infinite_loop, daemon=True)
 thread.start()
+app = fastapi.FastAPI()
 
 
 @app.post('/lights/on_movement')
@@ -14,7 +24,7 @@ def turn_lights_on_movement() -> dict:
     succeed = False
     reason = 'daytime'
 
-    if switch.check_night():
+    if sensor.check_night():
         switch.turn_on_for(seconds=15)
         succeed = True
         reason = 'movement-detected'

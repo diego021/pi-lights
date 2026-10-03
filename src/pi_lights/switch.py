@@ -1,15 +1,4 @@
-import datetime
 import time
-import zoneinfo
-
-DEFAULT_TZ = zoneinfo.ZoneInfo('America/Bogota')
-
-
-def check_night(tz: zoneinfo.ZoneInfo = DEFAULT_TZ) -> bool:
-    start = datetime.time(18, 15, 0)
-    end = datetime.time(5, 45, 0)
-    now = datetime.datetime.now(tz=tz).time()
-    return now >= start or now <= end
 
 
 def turn_on() -> None:
