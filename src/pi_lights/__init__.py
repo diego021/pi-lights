@@ -10,10 +10,8 @@ SENSORS = []
 
 @contextlib.asynccontextmanager
 async def lifespan(_app: fastapi.FastAPI) -> AsyncIterator[None]:
-    light_sensor = sensor.Sensor(
-        port='/dev/serial0',
-        trigger=lambda: switch.turn_on_for(5)
-    )
+    light_sensor = sensor.Sensor(port='/dev/serial0')
+    light_sensor.add_trigger(trigger=switch.turn_on_while)
     light_sensor.start_loop()
     SENSORS.append(light_sensor)
     yield

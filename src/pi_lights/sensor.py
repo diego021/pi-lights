@@ -3,13 +3,16 @@ import datetime
 import enum
 import struct
 import threading
-import time
 import zoneinfo
 from collections.abc import Callable, Iterator
 
 import serial
 
 DEFAULT_TZ = zoneinfo.ZoneInfo('America/Bogota')
+
+
+type _ActionFunc = Callable[[], bool]
+type _TriggerFunc = Callable[[_ActionFunc], None]
 
 
 class State(enum.Enum):
@@ -56,7 +59,9 @@ class Sensor:
     ) -> None:
         self.sensor = serial.Serial(port, baud, timeout=1)
         self._buffer = b''
-        self._trigger = lambda: None
+        self._present = False
+        self._trigger: _TriggerFunc | None = None
+        self._thread_action: threading.Thread | None = None
         self._thread: threading.Thread | None = None
         self._kill = threading.Event()
         self._enabled = threading.Event()
@@ -65,6 +70,19 @@ class Sensor:
     @property
     def _full_header_size(self) -> int:
         return len(self.HEADER) + self.LENGTH_META
+
+    def _fire(self) -> None:
+        if self._trigger is None:
+            return
+        if self._thread_action and self._thread_action.is_alive():
+            return
+        self._thread_action = threading.Thread(
+            target=self._trigger, args=(self._is_present,), daemon=True
+        )
+        self._thread_action.start()
+
+    def _is_present(self) -> bool:
+        return self._enabled.is_set() and not self._kill.is_set() and self._present
 
     def _stream(self) -> Iterator[Reading]:
         while not self._kill.is_set():
@@ -104,11 +122,13 @@ class Sensor:
         stream = self._stream()
         while not self._kill.is_set():
             if not self._enabled.is_set():
+                self._present = False
                 self._enabled.wait(1)
                 self.flush()
                 continue
 
             if not check_night():
+                self._present = False
                 if self._kill.wait(60):
                     break
                 self.flush()
@@ -120,12 +140,11 @@ class Sensor:
                 break
 
             print(reading)
-            if reading.state.present:
-                self._trigger()
-                time.sleep(0.2)
-                self.flush()
+            self._present = reading.state.present
+            if self._is_present():
+                self._fire()
 
-    def add_trigger(self, trigger: Callable[[], None]) -> None:
+    def add_trigger(self, trigger: _TriggerFunc) -> None:
         self._trigger = trigger
 
     def flush(self) -> None:
@@ -134,6 +153,8 @@ class Sensor:
 
     def pause(self) -> None:
         self._enabled.clear()
+        if self._thread_action:
+            self._thread_action.join(timeout=2)
 
     def resume(self) -> None:
         self._enabled.set()
@@ -141,10 +162,13 @@ class Sensor:
     def shutdown(self) -> None:
         self._kill.set()
         self._enabled.set()
-        if self._thread:
-            self._thread.join(timeout=5)
+        for t in (self._thread, self._thread_action):
+            if t:
+                t.join(timeout=5)
         self.sensor.close()
 
     def start_loop(self) -> None:
+        if self._thread and self._thread.is_alive():
+            return
         self._thread = threading.Thread(target=self._loop, daemon=True)
         self._thread.start()
