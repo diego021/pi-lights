@@ -2,8 +2,10 @@ import dataclasses
 import datetime
 import enum
 import struct
+import threading
+import time
 import zoneinfo
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 
 import serial
 
@@ -16,16 +18,26 @@ class State(enum.Enum):
     STATIONARY = 2
     BOTH = 3
 
+    @property
+    def present(self) -> bool:
+        return self.value > 0
+
 
 @dataclasses.dataclass(frozen=True)
 class Reading:
     state: State
-    present: bool
     moving_cm: int
     moving_energy: int
     still_cm: int
     still_energy: int
     distance_cm: int
+
+
+def check_night(tz: zoneinfo.ZoneInfo = DEFAULT_TZ) -> bool:
+    start = datetime.time(18, 15, 0)
+    end = datetime.time(5, 45, 0)
+    now = datetime.datetime.now(tz=tz).time()
+    return now >= start or now <= end
 
 
 class Sensor:
@@ -40,8 +52,15 @@ class Sensor:
     FRAME_TYPE_TARGET = 0x02
     MIN_TARGET_LENGTH = 11
 
-    def __init__(self, port: str | None = None, baud: int | None = None) -> None:
-        self.buffer = b''
+    def __init__(
+        self,
+        trigger: Callable[[], None],
+        port: str | None = None,
+        baud: int | None = None,
+    ) -> None:
+        self._buffer = b''
+        self._thread = None
+        self._trigger = trigger
         self.port = port or self.PORT
         self.baud = baud or self.BAUD
         self.sensor = serial.Serial(self.port, self.baud, timeout=1)
@@ -50,35 +69,24 @@ class Sensor:
     def _full_header_size(self) -> int:
         return len(self.HEADER) + self.LENGTH_META
 
-    def close(self) -> None:
-        self.sensor.close()
-
-    def flush(self) -> None:
-        self.sensor.reset_input_buffer()
-        self.buffer = b''
-
-    def read_once(self) -> Reading:
-        self.sensor.reset_input_buffer()
-        return next(self.read_loop())
-
-    def read_loop(self) -> Iterator[Reading]:
+    def _stream(self) -> Iterator[Reading]:
         while True:
-            self.buffer += self.sensor.read(64)
-            while (i := self.buffer.find(self.HEADER)) >= 0 and len(
-                self.buffer
+            self._buffer += self.sensor.read(64)
+            while (i := self._buffer.find(self.HEADER)) >= 0 and len(
+                self._buffer
             ) >= i + self._full_header_size:
                 length_start = i + len(self.HEADER)
                 data_start = i + self._full_header_size
-                data_length = struct.unpack('<H', self.buffer[length_start:data_start])[
-                    0
-                ]
+                data_length = struct.unpack(
+                    '<H', self._buffer[length_start:data_start]
+                )[0]
                 end = data_start + data_length + len(self.TAIL)
 
-                if len(self.buffer) < end:
+                if len(self._buffer) < end:
                     break
 
-                data = self.buffer[data_start : data_start + data_length]
-                self.buffer = self.buffer[end:]
+                data = self._buffer[data_start : data_start + data_length]
+                self._buffer = self._buffer[end:]
 
                 if (
                     len(data) >= self.MIN_TARGET_LENGTH
@@ -88,7 +96,6 @@ class Sensor:
                     st, md, me, sd, se, dd = struct.unpack('<BHBHBH', data[2:11])
                     yield Reading(
                         state=State(st),
-                        present=st > 0,
                         moving_cm=md,
                         moving_energy=me,
                         still_cm=sd,
@@ -96,9 +103,33 @@ class Sensor:
                         distance_cm=dd,
                     )
 
+    def _loop(self) -> None:
+        stream = self._stream()
+        while True:
+            if not check_night():
+                time.sleep(60)
+                self.flush()
+                continue
 
-def check_night(tz: zoneinfo.ZoneInfo = DEFAULT_TZ) -> bool:
-    start = datetime.time(18, 15, 0)
-    end = datetime.time(5, 45, 0)
-    now = datetime.datetime.now(tz=tz).time()
-    return now >= start or now <= end
+            reading = next(stream)
+            print(reading)
+            if reading.state.present:
+                self._trigger()
+                time.sleep(0.2)
+                self.flush()
+
+    def flush(self) -> None:
+        self.sensor.reset_input_buffer()
+        self._buffer = b''
+
+    def open(self) -> None:
+        if not self.sensor.is_open:
+            self.sensor.open()
+        self.flush()
+
+    def close(self) -> None:
+        self.sensor.close()
+
+    def start_loop(self) -> None:
+        self._thread = threading.Thread(target=self._loop, daemon=True)
+        self._thread.start()

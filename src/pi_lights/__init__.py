@@ -1,55 +1,35 @@
-import time
-import threading
-
 import fastapi
 
 from . import sensor, switch
 
-
-def infinite_loop() -> None:
-    mv_serial = sensor.Sensor()
-    stream = mv_serial.read_loop()
-    while True:
-        if not sensor.check_night():
-            time.sleep(60)
-            mv_serial.flush()
-            continue
-
-        reading = next(stream)
-        print(reading)
-        if reading.present:
-            # import os
-            # os.system('pw-play /usr/share/sounds/freedesktop/stereo/alarm-clock-elapsed.oga')  # Test
-            # time.sleep(1)
-            switch.turn_on_for(10)
-            mv_serial.flush()
+SENSORS = []
 
 
-thread = threading.Thread(target=infinite_loop, daemon=True)
-thread.start()
+def _setup_sensors() -> None:
+    light_sensor = sensor.Sensor(trigger=lambda: switch.turn_on_for(10))
+    light_sensor.start_loop()
+    SENSORS.append(light_sensor)
+
+
 app = fastapi.FastAPI()
+_setup_sensors()
 
 
-@app.post('/lights/on_movement')
-def turn_lights_on_movement() -> dict:
-    succeed = False
-    reason = 'daytime'
-
-    if sensor.check_night():
-        switch.turn_on_for(seconds=15)
-        succeed = True
-        reason = 'movement-detected'
-
-    return {'succeed': succeed, 'reason': reason}
+@app.post('/lights/auto')
+def turn_auto_lights() -> dict:
+    # switch.MODE = switch.Mode.AUTO
+    return {'succeed': True, 'reason': 'on-demand'}
 
 
 @app.post('/lights/on')
 def turn_on_lights() -> dict:
+    # switch.MODE = switch.Mode.ON
     switch.turn_on()
     return {'succeed': True, 'reason': 'on-demand'}
 
 
 @app.post('/lights/off')
 def turn_off_lights() -> dict:
+    # switch.MODE = switch.Mode.OFF
     switch.turn_off()
     return {'succeed': True, 'reason': 'on-demand'}
