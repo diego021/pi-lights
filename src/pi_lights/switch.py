@@ -1,4 +1,5 @@
 import time
+from collections.abc import Callable
 
 
 def turn_on() -> None:
@@ -9,7 +10,8 @@ def turn_off() -> None:
     print('Turning lights OFF!')
 
 
-def turn_on_for(seconds: int) -> None:
+def turn_on_while(condition: Callable[[], bool], interval: int = 1) -> None:
     turn_on()
-    time.sleep(seconds)
+    while condition():
+        time.sleep(interval)
     turn_off()

@@ -41,9 +41,6 @@ def check_night(tz: zoneinfo.ZoneInfo = DEFAULT_TZ) -> bool:
 
 
 class Sensor:
-    PORT = '/dev/serial0'
-    BAUD = 256_000
-
     LENGTH_META = 2
     HEADER = b'\xf4\xf3\xf2\xf1'
     TAIL = b'\xf8\xf7\xf6\xf5'
@@ -54,23 +51,23 @@ class Sensor:
 
     def __init__(
         self,
-        trigger: Callable[[], None],
-        port: str | None = None,
-        baud: int | None = None,
+        port: str,
+        baud: int = 256_000,
     ) -> None:
+        self.sensor = serial.Serial(port, baud, timeout=1)
         self._buffer = b''
-        self._thread = None
-        self._trigger = trigger
-        self.port = port or self.PORT
-        self.baud = baud or self.BAUD
-        self.sensor = serial.Serial(self.port, self.baud, timeout=1)
+        self._trigger = lambda: None
+        self._thread: threading.Thread | None = None
+        self._kill = threading.Event()
+        self._enabled = threading.Event()
+        self._enabled.set()
 
     @property
     def _full_header_size(self) -> int:
         return len(self.HEADER) + self.LENGTH_META
 
     def _stream(self) -> Iterator[Reading]:
-        while True:
+        while not self._kill.is_set():
             self._buffer += self.sensor.read(64)
             while (i := self._buffer.find(self.HEADER)) >= 0 and len(
                 self._buffer
@@ -105,29 +102,47 @@ class Sensor:
 
     def _loop(self) -> None:
         stream = self._stream()
-        while True:
-            if not check_night():
-                time.sleep(60)
+        while not self._kill.is_set():
+            if not self._enabled.is_set():
+                self._enabled.wait(1)
                 self.flush()
                 continue
 
-            reading = next(stream)
+            if not check_night():
+                if self._kill.wait(60):
+                    break
+                self.flush()
+                continue
+
+            try:
+                reading = next(stream)
+            except StopIteration:
+                break
+
             print(reading)
             if reading.state.present:
                 self._trigger()
                 time.sleep(0.2)
                 self.flush()
 
+    def add_trigger(self, trigger: Callable[[], None]) -> None:
+        self._trigger = trigger
+
     def flush(self) -> None:
         self.sensor.reset_input_buffer()
         self._buffer = b''
 
-    def open(self) -> None:
-        if not self.sensor.is_open:
-            self.sensor.open()
-        self.flush()
+    def pause(self) -> None:
+        self._enabled.clear()
 
-    def close(self) -> None:
+    def resume(self) -> None:
+        self._enabled.set()
+
+    def shutdown(self) -> None:
+        self._kill.set()
+        self._enabled.set()
+        if self._thread:
+            self._thread.join(timeout=5)
         self.sensor.close()
 
     def start_loop(self) -> None:
