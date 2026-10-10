@@ -1,5 +1,5 @@
-import threading
 import time
+import threading
 
 import fastapi
 
@@ -7,11 +7,22 @@ from . import sensor, switch
 
 
 def infinite_loop() -> None:
+    mv_serial = sensor.Sensor()
+    stream = mv_serial.read_loop()
     while True:
-        if sensor.check_night() and sensor.get_reading() < sensor.THRESHOLD:
-            switch.turn_on_for(20)
+        if not sensor.check_night():
+            time.sleep(60)
+            mv_serial.flush()
             continue
-        time.sleep(1)
+
+        reading = next(stream)
+        print(reading)
+        if reading.present:
+            # import os
+            # os.system('pw-play /usr/share/sounds/freedesktop/stereo/alarm-clock-elapsed.oga')  # Test
+            # time.sleep(1)
+            switch.turn_on_for(10)
+            mv_serial.flush()
 
 
 thread = threading.Thread(target=infinite_loop, daemon=True)
