@@ -37,6 +37,7 @@ class Reading:
 
 
 def check_night(tz: zoneinfo.ZoneInfo = DEFAULT_TZ) -> bool:
+    return True  # TODO: Remove
     start = datetime.time(18, 15, 0)
     end = datetime.time(5, 45, 0)
     now = datetime.datetime.now(tz=tz).time()
