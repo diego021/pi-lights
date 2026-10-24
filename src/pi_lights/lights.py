@@ -7,9 +7,7 @@ logger = logging.getLogger(__name__)
 
 class Lights:
     def __init__(self, pin: int) -> None:
-        self._relay = gpiozero.OutputDevice(
-            pin, active_high=False, initial_value=False
-        )
+        self._relay = gpiozero.OutputDevice(pin, active_high=False, initial_value=False)
 
     def turn_on(self) -> None:
         logger.info('Turning lights ON')
