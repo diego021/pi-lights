@@ -6,15 +6,15 @@ import fastapi
 
 from . import lights, schedule, sensor
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.DEBUG)
 
-RELAY_PIN = 24
+RELAY_4_PIN = 24
 SENSOR_PORT = '/dev/serial0'
 
 
 @contextlib.asynccontextmanager
 async def lifespan(app: fastapi.FastAPI) -> AsyncIterator[None]:
-    app.state.lights = lights.Lights(pin=RELAY_PIN)
+    app.state.lights = lights.Lights(pin=RELAY_4_PIN)
     app.state.sensor = sensor.PresenceSensor(
         port=SENSOR_PORT,
         on_change=app.state.lights.switch,
