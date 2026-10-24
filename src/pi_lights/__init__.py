@@ -18,7 +18,7 @@ async def lifespan(app: fastapi.FastAPI) -> AsyncIterator[None]:
     app.state.sensor = sensor.PresenceSensor(
         port=SENSOR_PORT,
         on_change=app.state.lights.switch,
-        active_when=schedule.is_night,
+        active_when=schedule.always,
     )
     app.state.sensor.start()
     yield
