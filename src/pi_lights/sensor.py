@@ -1,21 +1,31 @@
 import dataclasses
-import datetime
 import enum
+import logging
 import struct
 import threading
-import zoneinfo
-from collections.abc import Callable, Iterator
+from collections.abc import Callable
+from typing import Self
 
 import serial
 
-DEFAULT_TZ = zoneinfo.ZoneInfo('America/Bogota')
+logger = logging.getLogger(__name__)
+
+type _Condition = Callable[[], bool]
+type _PresenceHandler = Callable[[bool], None]
+
+# HLK-LD2410 frame: HEADER | data length (uint16 LE) | data | TAIL
+HEADER = b'\xf4\xf3\xf2\xf1'
+TAIL = b'\xf8\xf7\xf6\xf5'
+_LENGTH = struct.Struct('<H')
+PREFIX_SIZE = len(HEADER) + _LENGTH.size
+
+# Target data: frame type | frame head | target payload
+_TARGET_PREFIX = bytes([0x02, 0xAA])
+_TARGET = struct.Struct('<BHBHBH')
+_MIN_TARGET_LENGTH = len(_TARGET_PREFIX) + _TARGET.size
 
 
-type _ActionFunc = Callable[[], bool]
-type _TriggerFunc = Callable[[_ActionFunc], None]
-
-
-class State(enum.Enum):
+class TargetState(enum.Enum):
     NONE = 0
     MOVING = 1
     STATIONARY = 2
@@ -23,153 +33,119 @@ class State(enum.Enum):
 
     @property
     def present(self) -> bool:
-        return self.value > 0
+        return self is not TargetState.NONE
 
 
 @dataclasses.dataclass(frozen=True)
 class Reading:
-    state: State
+    state: TargetState
     moving_cm: int
     moving_energy: int
     still_cm: int
     still_energy: int
     distance_cm: int
 
+    @classmethod
+    def from_bytes(cls, payload: bytes) -> Self:
+        st, md, me, sd, se, dd = _TARGET.unpack_from(payload)
+        return cls(
+            state=TargetState(st),
+            moving_cm=md,
+            moving_energy=me,
+            still_cm=sd,
+            still_energy=se,
+            distance_cm=dd,
+        )
 
-def check_night(tz: zoneinfo.ZoneInfo = DEFAULT_TZ) -> bool:
-    return True  # TODO: Remove
-    start = datetime.time(18, 15, 0)
-    end = datetime.time(5, 45, 0)
-    now = datetime.datetime.now(tz=tz).time()
-    return now >= start or now <= end
+
+def _parse_frames(buffer: bytes) -> tuple[list[Reading], bytes]:
+    """Parse all complete frames in buffer; return readings and leftover bytes."""
+    readings = []
+    while (start := buffer.find(HEADER)) >= 0:
+        data_start = start + PREFIX_SIZE
+        if len(buffer) < data_start:
+            break
+        (data_length,) = _LENGTH.unpack_from(buffer, start + len(HEADER))
+        end = data_start + data_length + len(TAIL)
+        if len(buffer) < end:
+            break
+
+        data = buffer[data_start : data_start + data_length]
+        buffer = buffer[end:]
+
+        if len(data) >= _MIN_TARGET_LENGTH and data.startswith(_TARGET_PREFIX):
+            readings.append(Reading.from_bytes(data[len(_TARGET_PREFIX) :]))
+    return readings, buffer
 
 
-class Sensor:
-    LENGTH_META = 2
-    HEADER = b'\xf4\xf3\xf2\xf1'
-    TAIL = b'\xf8\xf7\xf6\xf5'
-
-    FRAME_HEAD_TARGET = 0xAA
-    FRAME_TYPE_TARGET = 0x02
-    MIN_TARGET_LENGTH = 11
-
+class PresenceSensor:
     def __init__(
         self,
         port: str,
+        on_change: _PresenceHandler,
+        active_when: _Condition = lambda: True,
         baud: int = 256_000,
     ) -> None:
-        self.sensor = serial.Serial(port, baud, timeout=1)
+        self._serial = serial.Serial(port, baud, timeout=1)
         self._buffer = b''
+        self._on_change = on_change
+        self._active_when = active_when
         self._present = False
-        self._trigger: _TriggerFunc | None = None
-        self._thread_action: threading.Thread | None = None
-        self._thread: threading.Thread | None = None
-        self._kill = threading.Event()
-        self._enabled = threading.Event()
-        self._enabled.set()
+        self._lock = threading.Lock()
+        self._reader_thread: threading.Thread | None = None
+        self._stopping = threading.Event()
+        self._active = threading.Event()
+        self._active.set()
 
-    @property
-    def _full_header_size(self) -> int:
-        return len(self.HEADER) + self.LENGTH_META
+    def _should_listen(self) -> bool:
+        return self._active.is_set() and self._active_when()
 
-    def _fire(self) -> None:
-        if self._trigger is None:
-            return
-        if self._thread_action and self._thread_action.is_alive():
-            return
-        self._thread_action = threading.Thread(
-            target=self._trigger, args=(self._is_present,), daemon=True
-        )
-        self._thread_action.start()
+    def _set_present(self, present: bool) -> None:
+        with self._lock:
+            if not self._active.is_set() or present == self._present:
+                return
+            self._present = present
+            self._on_change(present)
 
-    def _is_present(self) -> bool:
-        return self._enabled.is_set() and not self._kill.is_set() and self._present
+    def _read(self) -> list[Reading]:
+        self._buffer += self._serial.read(64)
+        readings, self._buffer = _parse_frames(self._buffer)
+        return readings
 
-    def _stream(self) -> Iterator[Reading]:
-        while not self._kill.is_set():
-            self._buffer += self.sensor.read(64)
-            while (i := self._buffer.find(self.HEADER)) >= 0 and len(
-                self._buffer
-            ) >= i + self._full_header_size:
-                length_start = i + len(self.HEADER)
-                data_start = i + self._full_header_size
-                data_length = struct.unpack(
-                    '<H', self._buffer[length_start:data_start]
-                )[0]
-                end = data_start + data_length + len(self.TAIL)
-
-                if len(self._buffer) < end:
-                    break
-
-                data = self._buffer[data_start : data_start + data_length]
-                self._buffer = self._buffer[end:]
-
-                if (
-                    len(data) >= self.MIN_TARGET_LENGTH
-                    and data[0] == self.FRAME_TYPE_TARGET
-                    and data[1] == self.FRAME_HEAD_TARGET
-                ):
-                    st, md, me, sd, se, dd = struct.unpack('<BHBHBH', data[2:11])
-                    yield Reading(
-                        state=State(st),
-                        moving_cm=md,
-                        moving_energy=me,
-                        still_cm=sd,
-                        still_energy=se,
-                        distance_cm=dd,
-                    )
-
-    def _loop(self) -> None:
-        stream = self._stream()
-        while not self._kill.is_set():
-            if not self._enabled.is_set():
-                self._present = False
-                self._enabled.wait(1)
-                self.flush()
-                continue
-
-            if not check_night():
-                self._present = False
-                if self._kill.wait(60):
-                    break
-                self.flush()
-                continue
-
-            try:
-                reading = next(stream)
-            except StopIteration:
-                break
-
-            print(reading)
-            self._present = reading.state.present
-            if self._is_present():
-                self._fire()
-
-    def add_trigger(self, trigger: _TriggerFunc) -> None:
-        self._trigger = trigger
-
-    def flush(self) -> None:
-        self.sensor.reset_input_buffer()
+    def _flush(self) -> None:
+        self._serial.reset_input_buffer()
         self._buffer = b''
+
+    def _run(self) -> None:
+        while not self._stopping.is_set():
+            if not self._should_listen():
+                self._set_present(False)
+                self._stopping.wait(1)
+                self._flush()
+                continue
+
+            for reading in self._read():
+                logger.debug('%s', reading)
+                self._set_present(reading.state.present)
+
+    def start(self) -> None:
+        if self._reader_thread and self._reader_thread.is_alive():
+            return
+        self._reader_thread = threading.Thread(target=self._run, daemon=True)
+        self._reader_thread.start()
 
     def pause(self) -> None:
-        self._enabled.clear()
-        if self._thread_action:
-            self._thread_action.join(timeout=2)
+        """Stop reacting to presence, without notifying on_change."""
+        with self._lock:
+            self._active.clear()
+            self._present = False
 
     def resume(self) -> None:
-        self._enabled.set()
+        self._active.set()
 
-    def shutdown(self) -> None:
-        self._kill.set()
-        self._enabled.set()
-        for t in (self._thread, self._thread_action):
-            if t:
-                t.join(timeout=5)
-        self.sensor.close()
-
-    def start_loop(self) -> None:
-        if self._thread and self._thread.is_alive():
-            return
-        self._thread = threading.Thread(target=self._loop, daemon=True)
-        self._thread.start()
+    def stop(self) -> None:
+        self._stopping.set()
+        if self._reader_thread:
+            self._reader_thread.join(timeout=5)
+        self._set_present(False)
+        self._serial.close()
