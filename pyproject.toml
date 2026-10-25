@@ -38,3 +38,11 @@ extend-select = [
     "TD",   # flake8-todos
     "UP",   # pyupgrade
 ]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["SLF001"]  # tests exercise private helpers like _parse_frames
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]
