@@ -1,6 +1,7 @@
 import contextlib
 import logging
 from collections.abc import AsyncIterator
+from typing import Literal, TypedDict
 
 import fastapi
 
@@ -10,6 +11,10 @@ logging.basicConfig(level=logging.DEBUG)
 
 RELAY_4_PIN = 24
 SENSOR_PORT = '/dev/serial0'
+
+
+class ModeResponse(TypedDict):
+    mode: Literal['auto', 'on', 'off']
 
 
 @contextlib.asynccontextmanager
@@ -30,20 +35,20 @@ app = fastapi.FastAPI(lifespan=lifespan)
 
 
 @app.post('/lights/auto')
-def set_auto_mode() -> dict:
+def set_auto_mode() -> ModeResponse:
     app.state.sensor.resume()
     return {'mode': 'auto'}
 
 
 @app.post('/lights/on')
-def set_lights_on() -> dict:
+def set_lights_on() -> ModeResponse:
     app.state.sensor.pause()
     app.state.lights.turn_on()
     return {'mode': 'on'}
 
 
 @app.post('/lights/off')
-def set_lights_off() -> dict:
+def set_lights_off() -> ModeResponse:
     app.state.sensor.pause()
     app.state.lights.turn_off()
     return {'mode': 'off'}

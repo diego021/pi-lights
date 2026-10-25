@@ -8,6 +8,8 @@ from typing import Self
 
 import serial
 
+from . import schedule
+
 logger = logging.getLogger(__name__)
 
 type _Condition = Callable[[], bool]
@@ -83,9 +85,11 @@ class PresenceSensor:
         self,
         port: str,
         on_change: _PresenceHandler,
-        active_when: _Condition = lambda: True,
+        active_when: _Condition = schedule.always,
         baud: int = 256_000,
     ) -> None:
+        self._port = port
+        self._baud = baud
         self._serial = serial.Serial(port, baud, timeout=1)
         self._buffer = b''
         self._on_change = on_change
@@ -96,6 +100,9 @@ class PresenceSensor:
         self._stopping = threading.Event()
         self._active = threading.Event()
         self._active.set()
+
+    def __repr__(self) -> str:
+        return f'{type(self).__name__}(port={self._port!r}, baud={self._baud!r})'
 
     def _should_listen(self) -> bool:
         return self._active.is_set() and self._active_when()
