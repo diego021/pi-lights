@@ -68,6 +68,13 @@ def test_keeps_incomplete_frame(cut: int) -> None:
     assert leftover == b''
 
 
+def test_drops_noise_without_header() -> None:
+    readings, leftover = sensor._parse_frames(bytes(1000))
+
+    assert readings == []
+    assert len(leftover) < len(sensor.HEADER)
+
+
 def test_ignores_non_target_frames() -> None:
     readings, leftover = sensor._parse_frames(frame(b'\x01\xaa\x00\x00'))
 

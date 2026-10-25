@@ -1,3 +1,4 @@
+import asyncio
 import contextlib
 import logging
 from collections.abc import AsyncIterator
@@ -19,16 +20,22 @@ class ModeResponse(TypedDict):
 
 @contextlib.asynccontextmanager
 async def lifespan(app: fastapi.FastAPI) -> AsyncIterator[None]:
-    app.state.lights = lights.Lights(pin=RELAY_4_PIN)
-    app.state.sensor = sensor.PresenceSensor(
-        port=SENSOR_PORT,
-        on_change=app.state.lights.switch,
-        active_when=schedule.always,
-    )
-    app.state.sensor.start()
-    yield
-    app.state.sensor.stop()
-    app.state.lights.close()
+    # Opening and closing the hardware blocks, so it runs off the event loop.
+    # The exit stack releases whatever was opened, even if startup fails midway.
+    async with contextlib.AsyncExitStack() as stack:
+        app.state.lights = await asyncio.to_thread(lights.Lights, pin=RELAY_4_PIN)
+        stack.push_async_callback(asyncio.to_thread, app.state.lights.close)
+
+        app.state.sensor = await asyncio.to_thread(
+            sensor.PresenceSensor,
+            port=SENSOR_PORT,
+            on_change=app.state.lights.switch,
+            active_when=schedule.always,
+        )
+        stack.push_async_callback(asyncio.to_thread, app.state.sensor.stop)
+
+        app.state.sensor.start()
+        yield
 
 
 app = fastapi.FastAPI(lifespan=lifespan)

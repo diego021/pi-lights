@@ -77,6 +77,9 @@ def _parse_frames(buffer: bytes) -> tuple[list[Reading], bytes]:
 
         if len(data) >= _MIN_TARGET_LENGTH and data.startswith(_TARGET_PREFIX):
             readings.append(Reading.from_bytes(data[len(_TARGET_PREFIX) :]))
+    else:
+        # No header left: keep only the bytes that could start a split header
+        buffer = buffer[-(len(HEADER) - 1) :]
     return readings, buffer
 
 
