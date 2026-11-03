@@ -107,3 +107,20 @@ def test_presence_sensor_repr(monkeypatch: pytest.MonkeyPatch) -> None:
     presence = sensor.PresenceSensor('/dev/ttyUSB0', on_change=print, baud=9600)
 
     assert repr(presence) == "PresenceSensor(port='/dev/ttyUSB0', baud=9600)"
+
+
+@pytest.mark.parametrize('present', [False, True])
+def test_resume_syncs_lights_with_first_reading(
+    monkeypatch: pytest.MonkeyPatch, present: bool
+) -> None:
+    monkeypatch.setattr(sensor.serial, 'Serial', lambda *_, **__: None)
+    changes: list[bool] = []
+    presence = sensor.PresenceSensor('/dev/ttyUSB0', on_change=changes.append)
+    presence._set_present(present)
+    changes.clear()
+
+    presence.pause()
+    presence.resume()
+    presence._set_present(present)
+
+    assert changes == [present]

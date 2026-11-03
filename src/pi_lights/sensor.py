@@ -97,7 +97,7 @@ class PresenceSensor:
         self._buffer = b''
         self._on_change = on_change
         self._active_when = active_when
-        self._present = False
+        self._present: bool | None = None
         self._lock = threading.Lock()
         self._reader_thread: threading.Thread | None = None
         self._stopping = threading.Event()
@@ -148,7 +148,7 @@ class PresenceSensor:
         """Stop reacting to presence, without notifying on_change."""
         with self._lock:
             self._active.clear()
-            self._present = False
+            self._present = None
 
     def resume(self) -> None:
         self._active.set()
