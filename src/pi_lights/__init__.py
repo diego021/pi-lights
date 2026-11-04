@@ -8,7 +8,10 @@ import fastapi
 
 from . import lights, schedule, sensor
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s %(levelname)s %(name)s: %(message)s',
+)
 
 RELAY_4_PIN = 24
 SENSOR_PORT = '/dev/serial0'

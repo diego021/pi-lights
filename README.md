@@ -41,6 +41,40 @@ can access GPIO and `/dev/serial0` (groups `gpio` and `dialout`).
 
 The server listens on port 8000 by default.
 
+## Running as a service
+
+`deploy/pi-lights.service` is a systemd unit that starts the app at boot and
+restarts it if it crashes. It assumes the user `pi` and the repository cloned
+at `/home/pi/pi-lights`. If yours differ, edit `User=` and `APP_DIR` at the top
+of the `[Service]` section. The unit looks for `uv` in `~/.local/bin` (its
+default install location) or on the system `PATH`.
+
+1. Install the dependencies once as that user, so the first start is fast:
+
+   ```bash
+   cd ~/pi-lights
+   uv sync
+   ```
+
+2. Install and start the unit:
+
+   ```bash
+   sudo cp deploy/pi-lights.service /etc/systemd/system/
+   sudo systemctl daemon-reload
+   sudo systemctl enable --now pi-lights
+   ```
+
+3. Check that it's running and follow the logs:
+
+   ```bash
+   systemctl status pi-lights
+   journalctl -u pi-lights -f
+   ```
+
+After pulling new changes, run `sudo systemctl restart pi-lights`. If you edit
+the unit file, copy it again and run `sudo systemctl daemon-reload` before
+restarting.
+
 ## API
 
 All endpoints are `POST` and return the resulting mode.

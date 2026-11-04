@@ -1,0 +1,23 @@
+[Unit]
+Description=pi-lights presence-activated lights control
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=exec
+# Change these two to match your setup.
+User=pi
+Environment=APP_DIR=/home/pi/pi-lights
+
+SupplementaryGroups=gpio dialout
+# Flush stdout right away so access logs reach the journal as they happen.
+Environment=PYTHONUNBUFFERED=1
+# Runs start.sh through bash because systemd doesn't expand variables in the
+# program path. ~/.local/bin, where uv installs itself, isn't on systemd's PATH.
+# $$ escapes $ from systemd so bash expands HOME and PATH at runtime.
+ExecStart=/usr/bin/bash -c 'PATH="$$HOME/.local/bin:$$PATH" exec "${APP_DIR}/start.sh"'
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
